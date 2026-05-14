@@ -1,0 +1,5 @@
+{
+  "name": "Service Hub",
+  "description": "Multi-tenant SaaS platform for managing service-based businesses like automotive workshops and electronics repair shops.",
+  "requestFramePermissions": []
+}

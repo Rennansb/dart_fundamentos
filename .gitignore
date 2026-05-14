@@ -1,3 +1,16 @@
+<<<<<<< HEAD
 # https://dart.dev/guides/libraries/private-files
 # Created by `dart pub`
+.dart_tool/
+=======
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+>>>>>>> a181c5717b8a5809bd7db7d49ac93ff9b9ec2516
+.env
 .dart_tool/

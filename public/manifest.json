@@ -1,0 +1,17 @@
+{
+  "name": "Service Hub",
+  "short_name": "ServiceHub",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "description": "Sistema de Gestão Inteligente para Oficinas e Serviços",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2966/2966486.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the platform, can be a Shop (Loja) or an Employee (Funcionário).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "shop", "employee", "fornecedor"] },
+        "plan": { "type": "string", "enum": ["free", "pro", "elite"], "description": "Subscription plan for shops" },
+        "planExpiresAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "blocked", "pending"] },
+        "companyId": { "type": "string", "description": "The ID of the shop this user belongs to. For shops and suppliers, this is their own UID." },
+        "phone": { "type": "string" },
+        "cpf": { "type": "string" },
+        "cnpj": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "startDate": { "type": "string", "description": "Shop/Supplier start date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "companyId", "createdAt"]
+    },
+    "Vehicle": {
+      "title": "Vehicle / Equipment",
+      "description": "A vehicle or equipment registered for service.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string", "description": "The UID of the business owner" },
+        "customerId": { "type": "string" },
+        "brand": { "type": "string" },
+        "model": { "type": "string" },
+        "year": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "notes": { "type": "string" },
+        "entryDate": { "type": "string", "format": "date-time" },
+        "deliveryDate": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "brand", "model", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A customer of the business.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "name": { "type": "string" },
+        "cpf": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string" },
+        "code": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "name", "cpf", "createdAt"]
+    },
+    "WorkOrder": {
+      "title": "Work Order",
+      "description": "A service record for a vehicle.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "equipmentId": { "type": "string" },
+        "reportedProblem": { "type": "string" },
+        "diagnosis": { "type": "string" },
+        "servicesPerformed": { "type": "string" },
+        "partsUsed": { "type": "string" },
+        "totalCost": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pendente de Peças", "Em Reparo", "Finalizado", "Aguardando Pagamento"] },
+        "budgetId": { "type": "string", "description": "The ID of the linked budget" },
+        "technicianId": { "type": "string", "description": "The UID of the employee assigned to this OS" },
+        "estimatedDeliveryDate": { "type": "string", "format": "date-time" },
+        "timeline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string" },
+              "content": { "type": "string" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "customerId", "equipmentId", "reportedProblem", "createdAt"]
+    },
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "A part or item in the inventory.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "partName": { "type": "string" },
+        "category": { "type": "string" },
+        "supplier": { "type": "string" },
+        "costPrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "minimumStockLevel": { "type": "number" },
+        "updatedBy": { "type": "string", "description": "The UID of the user who last updated the stock" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "partName", "stockQuantity", "createdAt"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "A service offered by the business.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number", "description": "Total price of the service" },
+        "estimatedTime": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "name", "price", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "An operational expense.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "description", "amount", "date", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A WhatsApp conversation between a business and a customer.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerName": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "number" },
+        "botPausedUntil": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "customerPhone", "lastMessageAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single message within a conversation.",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string" },
+        "senderType": { "type": "string", "enum": ["customer", "company", "system"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["content", "senderType", "createdAt"]
+    },
+    "Part": {
+      "title": "Part",
+      "description": "A part available in a supplier's catalog.",
+      "type": "object",
+      "properties": {
+        "supplierId": { "type": "string" },
+        "name": { "type": "string" },
+        "brand": { "type": "string" },
+        "price": { "type": "number" },
+        "photoURL": { "type": "string" },
+        "stock": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["supplierId", "name", "price", "createdAt"]
+    },
+    "PurchaseOrder": {
+      "title": "Purchase Order",
+      "description": "An order placed by a shop to a supplier.",
+      "type": "object",
+      "properties": {
+        "shopId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "commissionRate": { "type": "number", "description": "Percentage fee (e.g., 0.03 for 3%)" },
+        "commissionAmount": { "type": "number", "description": "Total commission for this order" },
+        "status": { "type": "string", "enum": ["aguardando envio", "peça encaminhada", "recebido"] },
+        "deliveryCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shopId", "supplierId", "items", "total", "status", "createdAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Subscription payments via PIX",
+      "type": "object",
+      "properties": {
+        "shopId": { "type": "string" },
+        "plan": { "type": "string", "enum": ["pro", "elite"] },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "pixCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shopId", "plan", "amount", "status", "createdAt"]
+    },
+    "Quote": {
+      "title": "Quote / Budget",
+      "description": "A budget or quote for a customer.",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerCpf": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "customerAddress": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "vehicleInfo": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "parts": { "type": "array" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "customerId", "customerName", "employeeId", "parts", "total", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Stores vehicles registered by businesses."
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Stores customers."
+    },
+    "/work_orders/{workOrderId}": {
+      "schema": { "$ref": "#/entities/WorkOrder" },
+      "description": "Stores work orders."
+    },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Stores inventory items."
+    },
+    "/services/{serviceId}": {
+      "schema": { "$ref": "#/entities/Service" },
+      "description": "Stores services offered."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Stores operational expenses."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Stores WhatsApp conversations."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Stores messages for a conversation."
+    },
+    "/parts/{partId}": {
+      "schema": { "$ref": "#/entities/Part" },
+      "description": "Stores parts from suppliers."
+    },
+    "/purchase_orders/{orderId}": {
+      "schema": { "$ref": "#/entities/PurchaseOrder" },
+      "description": "Stores purchase orders."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Stores subscription payments."
+    },
+    "/quotes/{quoteId}": {
+      "schema": { "$ref": "#/entities/Quote" },
+      "description": "Stores budgets/quotes."
+    }
+  }
+}

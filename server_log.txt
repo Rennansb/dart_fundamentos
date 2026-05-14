@@ -1,0 +1,119 @@
+
+> react-example@0.0.0 dev
+> tsx server.ts
+
+Starting server...
+[Firestore] Client Auth successful as megga11@hotmail.com
+[Firestore] Client SDK initialized with database: ai-studio-2eb3ac6b-1911-4719-89d8-ea64d4626a8c
+[Firestore] Project ID: gen-lang-client-0933573855
+[Firestore] Connection test read success. Exists: true
+[Firestore] Client SDK connection test write successful.
+[Firestore] VALIDATION SUCCESS: Admin user found in this database.
+[AI] GEMINI_API_KEY check: AVAILABLE
+[Monitor] Iniciando observação de pedidos de compra...
+Server running on http://localhost:3000
+[Automations] Running Stock check...
+15:27:36 [vite] (client) page reload server_log.txt
+15:27:36 [vite] (client) page reload server_log.txt
+[Automations] Running Post-Sale check...
+15:28:06 [vite] (client) page reload server_log.txt
+15:41:02 [vite] (client) hmr update /src/pages/Landing.tsx, /src/index.css
+15:41:02 [vite] (client) page reload server_log.txt
+15:42:14 [vite] (client) hmr update /src/components/ProfileModal.tsx, /src/index.css
+15:42:14 [vite] (client) page reload server_log.txt
+15:43:09 [vite] (client) hmr update /src/components/Layout.tsx, /src/index.css
+15:43:09 [vite] (client) page reload server_log.txt
+15:43:15 [vite] (client) hmr invalidate /src/components/Layout.tsx Could not Fast Refresh ("cn" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+15:43:15 [vite] (client) hmr update /src/App.tsx, /src/index.css
+15:43:15 [vite] (client) page reload server_log.txt
+15:43:20 [vite] (client) page reload server.ts
+15:43:20 [vite] (client) page reload server_log.txt
+15:43:48 [vite] .env changed, restarting server...
+15:43:48 [vite] (client) page reload server_log.txt
+15:43:48 [vite] server restarted.
+[MercadoPago] Creating subscription payment of R$ 29.99
+15:46:29 [vite] (client) page reload server_log.txt
+[MercadoPago Error]: {
+  cause: [
+    {
+      code: 7,
+      data: '23-03-2026T18:46:30UTC;d0f14634-937a-4ec3-9195-105f1365271a',
+      description: 'Unauthorized use of live credentials'
+    }
+  ],
+  error: 'unauthorized',
+  message: 'Unauthorized use of live credentials',
+  status: 401
+}
+[Payment Creation Error]: Unauthorized use of live credentials
+15:46:30 [vite] (client) page reload server_log.txt
+[MercadoPago] Creating subscription payment of R$ 29.99
+15:46:34 [vite] (client) page reload server_log.txt
+[MercadoPago Error]: {
+  cause: [
+    {
+      code: 7,
+      data: '23-03-2026T18:46:34UTC;08925143-1149-45d0-911d-342bbfc10fc0',
+      description: 'Unauthorized use of live credentials'
+    }
+  ],
+  error: 'unauthorized',
+  message: 'Unauthorized use of live credentials',
+  status: 401
+}
+[Payment Creation Error]: Unauthorized use of live credentials
+15:46:34 [vite] (client) page reload server_log.txt
+[MercadoPago] Creating subscription payment of R$ 29.99
+15:46:37 [vite] (client) page reload server_log.txt
+[MercadoPago Error]: {
+  cause: [
+    {
+      code: 7,
+      data: '23-03-2026T18:46:37UTC;1e04a82d-3790-4782-b358-61a06dc02c71',
+      description: 'Unauthorized use of live credentials'
+    }
+  ],
+  error: 'unauthorized',
+  message: 'Unauthorized use of live credentials',
+  status: 401
+}
+[Payment Creation Error]: Unauthorized use of live credentials
+15:46:37 [vite] (client) page reload server_log.txt
+[MercadoPago] Creating subscription payment of R$ 29.99
+15:46:42 [vite] (client) page reload server_log.txt
+[MercadoPago Error]: {
+  cause: [
+    {
+      code: 7,
+      data: '23-03-2026T18:46:43UTC;314ca31f-e881-4e77-a771-dee759e7b946',
+      description: 'Unauthorized use of live credentials'
+    }
+  ],
+  error: 'unauthorized',
+  message: 'Unauthorized use of live credentials',
+  status: 401
+}
+[Payment Creation Error]: Unauthorized use of live credentials
+15:46:43 [vite] (client) page reload server_log.txt
+16:03:44 [vite] (client) page reload server.ts
+16:03:44 [vite] (client) page reload server_log.txt
+16:04:18 [vite] (client) page reload server.ts
+16:04:18 [vite] (client) page reload server_log.txt
+16:15:18 [vite] (client) page reload server.ts
+16:15:18 [vite] (client) page reload server_log.txt
+16:15:27 [vite] (client) page reload server.ts
+16:15:27 [vite] (client) page reload server_log.txt
+16:34:39 [vite] (client) page reload server.ts
+16:34:39 [vite] (client) page reload server_log.txt
+16:47:47 [vite] (client) page reload server.ts
+16:47:47 [vite] (client) page reload server_log.txt
+16:52:13 [vite] (client) page reload server.ts
+16:52:13 [vite] (client) page reload server_log.txt
+17:03:22 [vite] (client) page reload server.ts
+17:03:22 [vite] (client) page reload server_log.txt
+17:03:35 [vite] .env changed, restarting server...
+17:03:35 [vite] (client) page reload server_log.txt
+17:03:35 [vite] server restarted.
+17:11:59 [vite] .env changed, restarting server...
+17:11:59 [vite] server restarted.
+[Automations] Running Stock check...

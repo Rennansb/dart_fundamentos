@@ -1,0 +1,1012 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../AuthContext';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { 
+  Users, 
+  Settings, 
+  MessageSquare, 
+  Plus, 
+  Package, 
+  Calendar, 
+  Search, 
+  Bell, 
+  MoreHorizontal, 
+  Layout, 
+  Download, 
+  ArrowUpRight, 
+  ArrowDownRight, 
+  CheckCircle2, 
+  Clock, 
+  AlertTriangle, 
+  Shield, 
+  Zap, 
+  Filter,
+  DollarSign,
+  Star,
+  Activity,
+  ExternalLink,
+  Crown,
+  Trophy,
+  AlertCircle,
+  Award,
+  TrendingUp,
+  Brain,
+  ClipboardList,
+  Store,
+  TrendingDown,
+  X,
+  ChevronRight,
+  Wrench,
+  Sparkles,
+  CheckCircle,
+  Target,
+  UserCheck,
+  BarChart3
+} from 'lucide-react';
+import WhatsAppSalesAssistant from '../components/WhatsAppSalesAssistant';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, AreaChart, Area, LineChart, Line
+} from 'recharts';
+import { motion, AnimatePresence } from 'motion/react';
+import { db } from '../firebase';
+import { collection, query, where, onSnapshot, orderBy, limit, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
+import { format, subDays, startOfDay, endOfDay, isWithinInterval, parseISO } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { handleFirestoreError, OperationType } from '../services/firestoreService';
+import PlanExpiryWarning from '../components/PlanExpiryWarning';
+import { CashFlowChart } from '../features/dashboard/components/CashFlowChart';
+import { ActiveVehiclesTable } from '../features/dashboard/components/ActiveVehiclesTable';
+import Kanban from './Kanban';
+import { whatsappService } from '../services/whatsappService';
+import { generateProfessionalReport } from '../services/invoiceGenerator';
+
+const COLORS_INCOME = ['#6366f1', '#818cf8', '#4f46e5', '#4338ca', '#3730a3'];
+const COLORS_EXPENSE = ['#f43f5e', '#fb7185', '#e11d48', '#be123c', '#9f1239'];
+const COLORS_GENERAL = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#ec4899'];
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white dark:bg-gray-800 p-4 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-2xl">
+        {label && <p className="text-gray-900 dark:text-white font-bold mb-3 border-b border-gray-50 dark:border-gray-700 pb-2">{label}</p>}
+        <div className="space-y-2">
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }}></div>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{entry.name}</span>
+              </div>
+              <span className="text-sm font-bold text-gray-900 dark:text-white">
+                R$ {(entry.value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+export default function Dashboard() {
+  const { user, profile, effectiveProfile, selectedCompanyId } = useAuth();
+  const navigate = useNavigate();
+  const [showKanbanModal, setShowKanbanModal] = useState(false);
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    inProgress: 0,
+    completed: 0,
+    totalRevenue: 0,
+    totalCustomers: 0,
+    totalShops: 0,
+    totalRevenueAll: 0,
+    totalExpensesAll: 0
+  });
+
+  const [period, setPeriod] = useState<'week' | 'month'>('week');
+  const [activeVehicles, setActiveVehicles] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [workOrders, setWorkOrders] = useState<any[]>([]);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [pendingConversations, setPendingConversations] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
+
+  const maintenanceAlerts = useMemo(() => {
+    if (profile?.role !== 'shop' || !workOrders.length) return [];
+    
+    const latestServices: Record<string, any> = {};
+    
+    // Calculate average ticket for the shop
+    const shopWOs = workOrders.filter(wo => (wo.status === 'completed' || wo.status === 'delivered') && (wo.totalCost || wo.laborPrice || 0) > 0);
+    const totalWOCost = shopWOs.length > 0 ? shopWOs.reduce((acc, wo) => acc + (wo.totalCost || (wo.laborPrice || 0) + (wo.partsPrice || 0)), 0) : 0;
+    const averageTicket = shopWOs.length > 0 ? totalWOCost / shopWOs.length : 500; // Default to 500 if no history
+    
+    workOrders.forEach(wo => {
+      // Only consider completed work orders for recurrence
+      if (wo.status !== 'completed' && wo.status !== 'delivered') return;
+
+      const key = `${wo.customerPhone}_${wo.vehicleInfo || wo.model}`;
+      let date: Date | null = null;
+      
+      if (wo.createdAt?.toDate) {
+        date = wo.createdAt.toDate();
+      } else if (wo.createdAt) {
+        date = new Date(wo.createdAt);
+      }
+      
+      if (!date || isNaN(date.getTime())) return;
+      
+      if (!latestServices[key] || date > latestServices[key].date) {
+        // Estimate revenue for this alert: Use average ticket or specific estimate
+        const estimatedRevenue = averageTicket;
+        const partsUsed = (wo.services || []).map((s: any) => s.name); // Using service name as proxy for part demand
+
+        latestServices[key] = {
+          date,
+          customerName: wo.customerName,
+          customerPhone: wo.customerPhone,
+          vehicle: wo.vehicleInfo || wo.model,
+          id: wo.id,
+          estimatedRevenue,
+          partsUsed
+        };
+      }
+    });
+
+    // Alert if last service was more than custom recurrence days ago (default 6 months)
+    const recurrenceDays = profile?.maintenanceRecurrence || 180;
+    const alertThreshold = subDays(new Date(), recurrenceDays);
+    
+    return Object.values(latestServices)
+      .filter((s: any) => s.date < alertThreshold)
+      .sort((a: any, b: any) => a.date.getTime() - b.date.getTime())
+      .slice(0, 5); // Show top 5
+  }, [workOrders, profile?.role, profile?.maintenanceRecurrence]);
+
+  useEffect(() => {
+    if (!user) return;
+    const companyId = selectedCompanyId || profile?.companyId;
+    if (!companyId) return;
+
+    // Real-time inventory
+    const qInventory = query(
+      collection(db, 'inventory'),
+      where('companyId', '==', companyId)
+    );
+
+    const unsubInventory = onSnapshot(qInventory, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setInventory(data);
+    }, (error) => {
+      console.error("Dashboard: Inventory listener error", error);
+    });
+
+    // Real-time work orders for stats and charts
+    const qWO = query(
+      collection(db, 'work_orders'),
+      where('companyId', '==', companyId)
+    );
+
+    const unsubWO = onSnapshot(qWO, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || (doc.data().createdAt ? new Date(doc.data().createdAt) : new Date())
+      }));
+      setWorkOrders(data);
+    }, (error) => {
+      console.error("Dashboard: Work Orders listener error", error);
+    });
+
+    // Real-time expenses
+    const qExpenses = query(
+      collection(db, 'expenses'),
+      where('companyId', '==', companyId)
+    );
+
+    const unsubExpenses = onSnapshot(qExpenses, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate?.() || (doc.data().date ? new Date(doc.data().date) : new Date())
+      }));
+      setExpenses(data);
+    }, (error) => {
+      console.error("Dashboard: Expenses listener error", error);
+    });
+
+    // Real-time active work orders for dashboard
+    const qActiveWO = query(
+      collection(db, 'work_orders'),
+      where('companyId', '==', companyId),
+      where('status', 'in', ['waiting_payment', 'in_repair', 'Pendente de Peças']),
+      orderBy('createdAt', 'desc'),
+      limit(5)
+    );
+
+    const unsubActiveWO = onSnapshot(qActiveWO, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || (doc.data().createdAt ? new Date(doc.data().createdAt) : new Date())
+      }));
+      setActiveVehicles(data);
+    }, (error) => {
+      console.error("Dashboard: Active WO listener error", error);
+    });
+
+    // Real-time stats
+    const unsubCustomers = onSnapshot(query(collection(db, 'customers'), where('companyId', '==', companyId)), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || (doc.data().createdAt ? new Date(doc.data().createdAt) : new Date())
+      }));
+      setCustomers(data);
+      setStats(prev => ({ ...prev, totalCustomers: snapshot.size }));
+    }, (error) => {
+      console.error("Error fetching customers count:", error);
+    });
+
+    // Real-time conversations that need human attention
+    const qConv = query(
+      collection(db, 'conversations'),
+      where('companyId', '==', companyId),
+      where('requiresHuman', '==', true)
+    );
+    const unsubConv = onSnapshot(qConv, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPendingConversations(data);
+    }, (error) => {
+      console.error("Error fetching pending conversations:", error);
+    });
+
+    const qApp = query(
+      collection(db, 'appointments'),
+      where('companyId', '==', companyId)
+    );
+    const unsubApp = onSnapshot(qApp, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAppointments(data);
+    }, (error) => {
+      console.error("Error fetching appointments:", error);
+    });
+
+    return () => {
+      unsubInventory();
+      unsubWO();
+      unsubExpenses();
+      unsubActiveWO();
+      unsubCustomers();
+      unsubConv();
+      unsubApp();
+    };
+  }, [user, profile, selectedCompanyId]);
+
+  useEffect(() => {
+    if (!user) return;
+    const companyId = selectedCompanyId || profile?.companyId;
+    if (!companyId) return;
+
+    const q = query(
+      collection(db, 'quotes'),
+      where('companyId', '==', companyId)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : new Date(doc.data().createdAt)
+      }));
+      setQuotes(data);
+    }, (error) => {
+      console.error("Dashboard: Quotes listener error", error);
+    });
+    return () => unsubscribe();
+  }, [user, profile, selectedCompanyId]);
+
+  // Calculate real stats and chart data
+  const processedData = useMemo(() => {
+    const days = period === 'month' ? 30 : 7;
+    const dailyData: any[] = [];
+    const today = new Date();
+
+    for (let i = days - 1; i >= 0; i--) {
+      const date = subDays(today, i);
+      const dateStr = format(date, 'dd/MM');
+      const start = startOfDay(date);
+      const end = endOfDay(date);
+
+      const dayRevenue = workOrders
+        .filter(wo => {
+          const woDate = wo.createdAt;
+          return woDate >= start && woDate <= end;
+        })
+        .reduce((acc, wo) => acc + (wo.paidAmount || 0), 0);
+
+      const dayReceivable = workOrders
+        .filter(wo => {
+          const woDate = wo.createdAt;
+          return woDate >= start && woDate <= end;
+        })
+        .reduce((acc, wo) => acc + (wo.remainingAmount || 0), 0);
+
+      const dayOtherExpenses = expenses
+        .filter(exp => {
+          const expDate = exp.date;
+          const isInventory = exp.description?.startsWith('Compra de estoque:') || exp.description?.startsWith('Reposição de estoque:');
+          const isPayable = !isInventory;
+          return expDate >= start && expDate <= end && (isInventory || isPayable);
+        })
+        .reduce((acc, exp) => acc + (exp.amount || 0), 0);
+
+      dailyData.push({
+        date: dateStr,
+        entradas: dayRevenue,
+        receber: dayReceivable,
+        saidas: dayOtherExpenses
+      });
+    }
+
+    const totalPaidRevenue = workOrders.reduce((acc, wo) => acc + (wo.paidAmount || 0), 0);
+    const totalReceivable = workOrders.reduce((acc, wo) => acc + (wo.remainingAmount || 0), 0);
+    const totalExpenses = expenses.reduce((acc, exp) => acc + (exp.amount || 0), 0);
+    
+    const inProgress = workOrders.filter(wo => !['completed', 'delivered'].includes(wo.status)).length;
+    const completed = workOrders.filter(wo => ['completed', 'delivered'].includes(wo.status)).length;
+
+    // Stats for today
+    const todayStart = startOfDay(today);
+    const todayEnd = endOfDay(today);
+
+    const customersToday = customers.filter(c => {
+      const cDate = c.createdAt;
+      return cDate >= todayStart && cDate <= todayEnd;
+    }).length;
+
+    const revenueToday = workOrders
+      .filter(wo => {
+        const woDate = wo.createdAt;
+        return woDate >= todayStart && woDate <= todayEnd;
+      })
+      .reduce((acc, wo) => acc + (wo.paidAmount || 0), 0);
+
+    const completedToday = workOrders
+      .filter(wo => {
+        const woDate = wo.updatedAt?.toDate?.() || (wo.updatedAt ? new Date(wo.updatedAt) : wo.createdAt);
+        return woDate >= todayStart && woDate <= todayEnd && ['completed', 'delivered'].includes(wo.status);
+      }).length;
+
+    // --- INTELLIGENCE ENGINE ---
+    
+    // 1. Health Score Calculation
+    const revenueRatio = totalPaidRevenue / (totalPaidRevenue + totalExpenses || 1);
+    const operationalRatio = completed / (workOrders.length || 1);
+    const inventoryRatio = 1 - (inventory.filter(i => (i.quantity || 0) <= (i.minQuantity || 0)).length / (inventory.length || 1));
+    
+    const healthScore = Math.round(
+      (revenueRatio * 40) + 
+      (operationalRatio * 30) + 
+      (inventoryRatio * 30)
+    );
+
+    // 2. Curva ABC Calculation - Based on Consumption Value
+    const consumptionValue: Record<string, number> = {};
+    const historicalWOs = workOrders.filter(wo => ['completed', 'delivered'].includes(wo.status));
+    
+    historicalWOs.forEach(wo => {
+      (wo.services || []).forEach((service: any) => {
+        if (service.type === 'part') {
+          const qty = service.quantity || 1;
+          const cost = service.costPrice || (service.price * 0.7) || 0;
+          consumptionValue[service.name] = (consumptionValue[service.name] || 0) + (qty * cost);
+        }
+      });
+    });
+
+    const analyzedABC = inventory.map((item: any) => {
+      const value = consumptionValue[item.name] || 0;
+      return { name: item.name, value };
+    }).sort((a, b) => b.value - a.value);
+
+    const grandTotalABC = analyzedABC.reduce((acc, item) => acc + item.value, 0);
+    let cumulativeValueABC = 0;
+    const catA = analyzedABC.filter(item => {
+      if (grandTotalABC === 0) return false;
+      cumulativeValueABC += item.value;
+      return (cumulativeValueABC / grandTotalABC) * 100 <= 70;
+    }).length;
+
+    // 3. Replenishment Calculation
+    const lowStockItems = inventory.filter(item => (item.quantity || 0) <= (item.minStock || 5));
+    const replenishmentInvestment = lowStockItems.reduce((acc, item) => {
+      const suggestBuy = Math.max((item.minStock || 5) * 2 - (item.quantity || 0), 5);
+      return acc + (suggestBuy * (item.costPrice || (item.price || 0) * 0.7));
+    }, 0);
+
+    // 4. Performance Metrics
+    const completedOrders = workOrders.filter(wo => ['completed', 'delivered'].includes(wo.status));
+    const averageTicket = completedOrders.length > 0 ? totalPaidRevenue / completedOrders.length : 0;
+    const totalBaseOrders = workOrders.length || 1;
+    const conversionRate = Math.round((completedOrders.length / totalBaseOrders) * 100);
+
+    const dynamicInsights = [];
+    
+    if (maintenanceAlerts.length > 0) {
+      dynamicInsights.push({
+        type: 'Oportunidade',
+        message: `**${maintenanceAlerts.length} clientes** não retornam há 6 meses. Posso lembrá-los da revisão?`,
+        icon: Activity,
+        color: 'text-indigo-600',
+        bg: 'bg-indigo-50/30',
+        actionLabel: 'Ver Clientes',
+        action: '/app/customers'
+      });
+    }
+
+    const lowStock = inventory.filter(i => (i.quantity || 0) <= (i.minQuantity || 0));
+    if (lowStock.length > 0) {
+      dynamicInsights.push({
+        type: 'Peças Críticas',
+        message: `${lowStock[0].name}${lowStock.length > 1 ? ` e mais ${lowStock.length - 1}` : ''} estão abaixo do estoque mínimo.`,
+        icon: AlertCircle,
+        color: 'text-rose-600',
+        bg: 'bg-rose-50/30',
+        actionLabel: 'Ver Peças',
+        action: '/app/inventory'
+      });
+    }
+
+    if (totalReceivable > totalPaidRevenue * 0.3) {
+      dynamicInsights.push({
+        type: 'Financeiro',
+        message: `Você tem **R$ ${totalReceivable.toLocaleString()}** a receber. Sugiro revisar cobranças pendentes.`,
+        icon: DollarSign,
+        color: 'text-emerald-600',
+        bg: 'bg-emerald-50/30',
+        actionLabel: 'Ver Pendentes',
+        action: '/app/work-orders'
+      });
+    }
+
+    // Top Categories
+    const totalLabor = workOrders.reduce((acc, wo) => acc + (wo.laborCost || 0), 0);
+    const totalParts = workOrders.reduce((acc, wo) => acc + (wo.partsCost || 0), 0);
+    const topIncome = [
+      { name: 'Mão de Obra', value: totalLabor },
+      { name: 'Peças', value: totalParts },
+    ];
+
+    const expenseCategories: Record<string, number> = {};
+    expenses.forEach(exp => {
+      const cat = exp.category || 'Outros';
+      expenseCategories[cat] = (expenseCategories[cat] || 0) + (exp.amount || 0);
+    });
+
+    const topExpenses = Object.entries(expenseCategories)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    // 5. Active Sales Predictions
+    const salesPredictions: any[] = [];
+    const vehiclesHistory: Record<string, any> = {};
+
+    workOrders.forEach(wo => {
+      if (!wo.plate) return;
+      if (!vehiclesHistory[wo.plate] || new Date(wo.createdAt?.toDate?.() || wo.createdAt) > new Date(vehiclesHistory[wo.plate].date)) {
+        vehiclesHistory[wo.plate] = {
+          plate: wo.plate,
+          customerName: wo.customerName,
+          customerPhone: wo.customerPhone,
+          vehicleInfo: wo.vehicleInfo || wo.model,
+          date: wo.createdAt?.toDate?.() || wo.createdAt,
+          mileage: parseInt(wo.mileage) || 0
+        };
+      }
+    });
+
+    Object.values(vehiclesHistory).forEach((v: any) => {
+      const lastDate = new Date(v.date);
+      const diffMonths = (today.getFullYear() - lastDate.getFullYear()) * 12 + (today.getMonth() - lastDate.getMonth());
+      if (diffMonths >= 6) {
+        salesPredictions.push({ ...v, priority: 'high', reason: 'Revisão periódica recomendada (6 meses)' });
+      }
+    });
+
+    // 6. Conversion Performance Logic
+    const last30Days = subDays(new Date(), 30);
+    const recentQuotes = quotes.filter(q => q.createdAt >= last30Days);
+
+    const categoryStats: Record<string, { total: number, approved: number }> = {};
+    recentQuotes.forEach(q => {
+      const category = q.category || 'Geral';
+      if (!categoryStats[category]) categoryStats[category] = { total: 0, approved: 0 };
+      categoryStats[category].total++;
+      if (workOrders.some(wo => wo.quoteId === q.id || (wo.customerId === q.customerId && Math.abs(wo.totalCost - q.total) < 1))) {
+        categoryStats[category].approved++;
+      }
+    });
+
+    const conversionData = Object.entries(categoryStats).map(([name, stats]) => ({
+      name,
+      taxa: Math.round((stats.approved / stats.total) * 100) || 0,
+      total: stats.total
+    })).sort((a, b) => b.total - a.total).slice(0, 5);
+
+    conversionData.forEach(item => {
+      if (item.taxa < 40 && item.total >= 3) {
+        dynamicInsights.push({
+          type: 'IA Performance',
+          message: `Sua conversão em **${item.name}** é de apenas **${item.taxa}%**. Sugiro revisar preços e fornecedores no Marketplace.`,
+          icon: Brain,
+          color: 'text-amber-600',
+          bg: 'bg-amber-50/30',
+          actionLabel: 'Ver Marketplace',
+          action: '/app/budgets'
+        });
+      }
+    });
+
+    const totalRevenueValue = workOrders.reduce((acc, wo) => acc + (wo.total || (wo.laborPrice || 0) + (wo.partsPrice || 0)), 0);
+    const totalPaidRevenueAll = workOrders.reduce((acc, wo) => acc + (wo.paidAmount || 0), 0);
+    const uniqueCustomerIds = new Set(historicalWOs.map(wo => wo.customerId).filter(Boolean));
+    const customerCount = uniqueCustomerIds.size || customers.length || 1;
+
+    return {
+      dailyData,
+      topIncome,
+      topExpenses,
+      totalRevenue: totalRevenueValue,
+      totalPaidRevenue: totalPaidRevenueAll,
+      totalReceivable,
+      totalExpenses,
+      inProgress,
+      completed,
+      customersToday,
+      revenueToday,
+      completedToday,
+      healthScore,
+      customerLTV: totalPaidRevenueAll / customerCount,
+      catAItems: catA > 0 ? catA : Math.min(inventory.length, 3), 
+      lowStockCount: lowStockItems.length,
+      replenishmentInvestment,
+      averageTicket,
+      conversionRate,
+      topInventory: analyzedABC.slice(0, 3),
+      dynamicInsights,
+      salesPredictions,
+      conversionData
+    };
+  }, [workOrders, expenses, customers, inventory, maintenanceAlerts, period, quotes]);
+
+  useEffect(() => {
+    if (profile?.role === 'admin' && !selectedCompanyId) {
+      const fetchAdminStats = async () => {
+        try {
+          const usersSnap = await getDocs(collection(db, 'users'));
+          const customersSnap = await getDocs(collection(db, 'customers'));
+          const workOrdersSnap = await getDocs(collection(db, 'work_orders'));
+          const expensesSnap = await getDocs(collection(db, 'expenses'));
+
+          let totalRevenueAll = 0;
+          workOrdersSnap.forEach(d => totalRevenueAll += d.data().totalCost || d.data().totalPrice || 0);
+
+          let totalExpensesAll = 0;
+          expensesSnap.forEach(d => totalExpensesAll += d.data().amount || 0);
+
+          setStats(prev => ({
+            ...prev,
+            totalShops: usersSnap.docs.filter(d => d.data().role === 'shop').length,
+            totalCustomers: customersSnap.size,
+            totalRevenueAll,
+            totalExpensesAll
+          }));
+        } catch (error) {
+          console.error("Error fetching admin stats:", error);
+        }
+      };
+      fetchAdminStats();
+    }
+  }, [profile?.role, profile, selectedCompanyId]);
+
+  const statCards = (profile?.role === 'admin' && !selectedCompanyId) ? [
+    { name: 'Total de Lojas', value: stats.totalShops, icon: Store, color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-900/20', trend: '+4%', isUp: true },
+    { name: 'Receita Total', value: `R$ ${stats.totalRevenueAll.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', trend: '+12%', isUp: true },
+    { name: 'Despesas Total', value: `R$ ${stats.totalExpensesAll.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingDown, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-900/20', trend: '+8%', isUp: false },
+    { name: 'Total de Clientes', value: stats.totalCustomers, icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20', trend: '+2%', isUp: true },
+  ] : [
+    { name: 'Faturamento Hoje', value: `R$ ${processedData.revenueToday.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', trend: 'Hoje', isUp: true },
+    { name: 'Clientes Hoje', value: processedData.customersToday, icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20', trend: 'Hoje', isUp: true },
+    { name: 'Concluídos Hoje', value: processedData.completedToday, icon: CheckCircle, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', trend: 'Hoje', isUp: true },
+    { name: 'Em Andamento', value: processedData.inProgress, icon: ClipboardList, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-900/20', trend: 'Total', isUp: true },
+    { name: 'Entradas (Pago)', value: `R$ ${processedData.totalPaidRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: DollarSign, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', trend: 'Total', isUp: true },
+    { name: 'A Receber', value: `R$ ${processedData.totalReceivable.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-900/20', trend: 'Total', isUp: true },
+    { name: 'Despesas', value: `R$ ${processedData.totalExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingDown, color: 'text-rose-600', bg: 'bg-rose-50 dark:bg-rose-900/20', trend: 'Total', isUp: false },
+  ];
+
+  const primaryStats = (profile?.role === 'admin' && !selectedCompanyId) ? statCards : statCards.slice(0, 4);
+
+  const quickActions = [
+    { name: 'Nova OS', icon: ClipboardList, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20', link: '/app/work-orders', hideFor: ['fornecedor'] },
+    { name: 'Novo Cliente', icon: Users, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20', link: profile?.role === 'fornecedor' ? '/app/supplier/customers' : '/app/customers', hideFor: ['fornecedor'] }, 
+    { name: 'Clientes', icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20', link: '/app/supplier/customers', showOnlyFor: ['fornecedor'] },
+    { name: 'Funcionários', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', link: '/app/employees' },
+    { name: 'Meu Catálogo', icon: Package, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-indigo-900/20', link: profile?.role === 'fornecedor' ? '/app/supplier/inventory' : '/app/inventory' },
+    { name: 'WhatsApp', icon: MessageSquare, color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-900/20', link: '/app/conversations', hideFor: ['fornecedor'] },
+    { name: 'Quadro Kanban', icon: ClipboardList, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-900/20', action: () => setShowKanbanModal(true) },
+    { name: profile?.role === 'fornecedor' ? 'Minhas Entregas' : 'Meus Pedidos', icon: Store, color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-900/20', link: profile?.role === 'fornecedor' ? '/app/supplier/orders' : '/app/orders' }
+  ].filter(action => {
+    if (action.hideFor?.includes(profile?.role || '')) return false;
+    if (action.showOnlyFor && !action.showOnlyFor.includes(profile?.role || '')) return false;
+    return true;
+  });
+
+  const generatePDF = () => {
+    const business = {
+      name: profile?.companyName || profile?.fullName || profile?.name || 'Service Hub Pro',
+      tradeName: profile?.tradeName || profile?.displayName,
+      doc: profile?.cnpj || profile?.ownerCpf || profile?.cpfCnpj,
+      address: profile?.address ? `${profile.address.street}, ${profile.address.number} - ${profile.address.city}/${profile.address.state}` : '',
+      contact: profile?.phone || profile?.email || '',
+      logo: profile?.logo
+    };
+
+    const sections = [
+      {
+        title: 'Análise de Performance Financeira',
+        headers: ['Indicador', 'Valor Atual', 'Classificação'],
+        body: [
+          ['Faturamento (Pago)', `R$ ${processedData.totalPaidRevenue.toLocaleString('pt-BR')}`, 'Receita Realizada'],
+          ['A Receber (Tickets)', `R$ ${processedData.totalReceivable.toLocaleString('pt-BR')}`, 'Capital em Trânsito'],
+          ['Custos Operacionais', `R$ ${processedData.totalExpenses.toLocaleString('pt-BR')}`, 'Saídas Efetuadas'],
+          ['Saldo Operacional', `R$ ${(processedData.totalPaidRevenue - processedData.totalExpenses).toLocaleString('pt-BR')}`, 'Resultado Período']
+        ]
+      },
+      {
+        title: 'Fluxo de Trabalho e Clientes',
+        headers: ['Métrica Operacional', 'Volume', 'Status'],
+        body: [
+          ['OS Concluídas', processedData.completed.toString(), 'Faturado'],
+          ['OS em Andamento', processedData.inProgress.toString(), 'Em Produção'],
+          ['Novos Clientes', processedData.customersToday.toString(), 'Novos Reg.'],
+          ['Agendamentos WhatsApp', appointments.filter(a => a.status === 'pending').length.toString(), 'Aguardando']
+        ]
+      }
+    ];
+    generateProfessionalReport('RELATÓRIO DE GESTÃO ESTRATÉGICA', business, sections);
+  };
+
+  return (
+    <div className="space-y-8 pb-12">
+      <PlanExpiryWarning />
+      
+      {/* Resumo de Boas-Vindas e Destaques */}
+      <motion.div 
+        initial={{ opacity: 0, y: -20 }} 
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-gradient-to-br from-indigo-900 via-indigo-800 to-purple-900 rounded-[2.5rem] p-10 md:p-14 text-white shadow-2xl relative overflow-hidden"
+      >
+        <div className="absolute top-0 right-0 w-2/3 h-full opacity-10 pointer-events-none">
+          <Zap className="w-full h-full -rotate-12 translate-x-1/3" />
+        </div>
+        
+        <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
+          <div className="flex-1 text-center lg:text-left">
+            <div className="inline-flex items-center gap-3 px-5 py-2 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs font-black uppercase tracking-[0.2em] mb-8">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              Inteligência de Gestão Ativa
+            </div>
+            <h1 className="text-4xl md:text-7xl font-black mb-6 tracking-tighter leading-tight italic">
+              Excelência em <br />
+              <span className="text-indigo-300 not-italic">Resultados.</span>
+            </h1>
+            <p className="text-xl text-indigo-100/70 font-medium max-w-2xl leading-relaxed">
+              {(profile?.role === 'admin' && !selectedCompanyId) 
+                ? 'Painel Geral: Monitorando alta performance em todas as unidades.' 
+                : `Seja muito bem-vindo, ${effectiveProfile?.name?.split(' ')[0] || 'Comandante'}. Seu negócio hoje está operando com ${processedData.healthScore}% de saúde técnica.`}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 w-full lg:w-auto">
+             <div className="bg-white/5 backdrop-blur-2xl p-8 rounded-[2rem] border border-white/10 text-center min-w-[170px] shadow-2xl">
+                <TrendingUp className="h-5 w-5 text-indigo-300 mx-auto mb-3" />
+                <div className="text-3xl font-black mb-1">R$ {processedData.totalPaidRevenue.toLocaleString('pt-BR')}</div>
+                <div className="text-[10px] uppercase font-black text-indigo-200 tracking-widest">Faturamento Pago</div>
+             </div>
+             <div className="bg-white/5 backdrop-blur-2xl p-8 rounded-[2rem] border border-white/10 text-center min-w-[170px] shadow-2xl">
+                <Package className="h-5 w-5 text-purple-300 mx-auto mb-3" />
+                <div className="text-3xl font-black mb-1">{inventory.length}</div>
+                <div className="text-[10px] uppercase font-black text-indigo-200 tracking-widest">Peças em Estoque</div>
+             </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Grid Principal Reorganizado */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* Coluna Esquerda: Foco Operacional (8/12) */}
+        <div className="lg:col-span-8 space-y-8">
+          
+          {/* Linha de Estatísticas Rápidas */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {primaryStats.map((stat, idx) => (
+              <motion.div key={idx} className="bg-white dark:bg-gray-800 p-6 rounded-[2rem] shadow-xl shadow-indigo-500/5 border border-gray-50 dark:border-gray-700/50 group relative overflow-hidden">
+                <div className={`absolute top-0 right-0 p-4 opacity-5 group-hover:scale-150 transition-transform`}><stat.icon className="w-12 h-12" /></div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`p-2.5 rounded-xl ${stat.bg} shadow-lg shadow-indigo-500/10`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
+                  <div className={`flex items-center gap-0.5 text-[10px] font-black tracking-tighter ${stat.isUp ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {stat.trend} {stat.isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                  </div>
+                </div>
+                <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.15em] mb-1">{stat.name}</p>
+                <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">{stat.value}</h3>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Ações Rápidas e Prioridade de Execução */}
+          <section className="bg-white dark:bg-gray-800 p-8 rounded-[2.5rem] shadow-xl shadow-indigo-500/5 border border-gray-50 dark:border-gray-700/50">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight flex items-center gap-3">
+                <Zap className="h-6 w-6 text-indigo-600 animate-pulse" /> Execução Prioritária
+              </h3>
+              <button 
+                onClick={() => setShowKanbanModal(true)}
+                className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 dark:text-indigo-300 px-6 py-2.5 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-indigo-500/10"
+              >
+                Board Operacional Completo
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              {quickActions.map((action) => (
+                <button 
+                  key={action.name} 
+                  onClick={() => action.action ? action.action() : navigate(action.link!)} 
+                  className="group flex flex-col items-center justify-center p-5 rounded-3xl bg-gray-50 dark:bg-gray-900/30 border border-transparent hover:bg-white dark:hover:bg-gray-800 hover:shadow-xl hover:border-indigo-100 dark:hover:border-indigo-900/50 transition-all duration-300"
+                >
+                  <div className={`p-4 rounded-2xl ${action.bg} mb-3 group-hover:scale-110 group-hover:-rotate-6 transition-transform shadow-lg shadow-indigo-500/5`}>
+                    <action.icon className={`h-6 w-6 ${action.color}`} />
+                  </div>
+                  <span className="text-xs font-black text-gray-800 dark:text-gray-200 uppercase tracking-tight">{action.name}</span>
+                </button>
+              ))}
+            </div>
+
+          </section>
+
+          {/* Card de Veículos em Serviço - Independente */}
+          <section className="bg-white dark:bg-gray-800 p-8 rounded-[2.5rem] shadow-xl shadow-indigo-500/5 border border-gray-50 dark:border-gray-700/50">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight flex items-center gap-3">
+                <Wrench className="h-6 w-6 text-indigo-600" /> Veículos em Serviço
+              </h3>
+              <div className="flex bg-indigo-50 dark:bg-indigo-900/30 px-4 py-1.5 rounded-xl">
+                <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-300 uppercase tracking-widest">{activeVehicles.length} Ativos</span>
+              </div>
+            </div>
+            <ActiveVehiclesTable activeVehicles={activeVehicles} />
+          </section>
+
+          {/* Gráfico de Fluxo de Caixa - Expandido */}
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-[2.5rem] shadow-xl shadow-indigo-500/5 border border-gray-50 dark:border-gray-700/50">
+             <CashFlowChart data={processedData.dailyData} CustomTooltip={CustomTooltip} />
+          </div>
+        </div>
+
+        {/* Coluna Direita: Inteligência e Estratégia (4/12) */}
+        <div className="lg:col-span-4 space-y-8">
+          
+          {/* Card de Meta Mensal */}
+          <motion.div 
+            onClick={() => navigate('/app/monthly-goal')} 
+            className="group bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-700 p-8 rounded-[2.5rem] shadow-2xl shadow-indigo-600/20 text-white cursor-pointer relative overflow-hidden transition-all hover:scale-[1.02] active:scale-95"
+          >
+             {profile?.plan !== 'elite' && profile?.role !== 'admin' && (
+              <div className="absolute inset-0 bg-indigo-900/90 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-8 text-center">
+                <Crown className="w-10 h-10 text-amber-500 mb-4" />
+                <h4 className="text-lg font-black mb-1 uppercase tracking-tighter">Recurso Elite</h4>
+                <p className="text-xs text-indigo-300 font-bold max-w-[180px]">Mude para o plano Elite e desbloqueie o acompanhamento de metas</p>
+                <button onClick={(e) => { e.stopPropagation(); navigate('/app/subscription'); }} className="mt-6 px-6 py-2.5 bg-white text-indigo-600 rounded-2xl font-black uppercase text-[11px] shadow-xl">Migrar Agora</button>
+              </div>
+            )}
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform">
+               <Target className="w-32 h-32" />
+            </div>
+            
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-10">
+                 <div>
+                    <h3 className="text-xl font-black flex items-center gap-3 uppercase tracking-tighter">Meta Mensal</h3>
+                    <p className="text-[10px] font-black uppercase text-indigo-200 tracking-widest mt-1">Status de Faturamento</p>
+                 </div>
+                 <div className="bg-white/20 p-4 rounded-3xl text-xl font-black">{Math.round((processedData.totalPaidRevenue / (profile?.monthlyGoal || 50000)) * 100)}%</div>
+              </div>
+
+              <div className="space-y-6">
+                  <div>
+                    <p className="text-[10px] font-black uppercase opacity-60 tracking-widest mb-2 font-mono">Faturamento Pago</p>
+                    <div className="flex items-baseline gap-2">
+                       <span className="text-xs font-bold opacity-60 uppercase tracking-tighter">R$</span>
+                       <span className="text-4xl font-black tracking-tighter">{processedData.totalPaidRevenue.toLocaleString('pt-BR')}</span>
+                    </div>
+                  </div>
+                  <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden border border-white/5 p-1">
+                    <div className="h-full bg-gradient-to-r from-emerald-400 to-indigo-300 rounded-full shadow-[0_0_15px_rgba(52,211,153,0.5)] transition-all duration-1000" style={{ width: `${Math.min((processedData.totalPaidRevenue / (profile?.monthlyGoal || 50000)) * 100, 100)}%` }} />
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[0.2em] opacity-80">
+                    <span>Alvo: R$ {(profile?.monthlyGoal || 50000).toLocaleString('pt-BR')}</span>
+                    <div className="flex items-center gap-1 text-emerald-400"><TrendingUp className="h-3 w-3" /> No Caminho</div>
+                  </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Grid de Status de Inteligência (Mini Cards) */}
+          <div className="grid grid-cols-1 gap-4">
+             <motion.button 
+                onClick={() => navigate('/app/intelligence/abc')} 
+                className="group relative p-6 rounded-[2rem] bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 flex items-center gap-6 transition-all hover:bg-white dark:hover:bg-gray-800 hover:shadow-xl hover:shadow-amber-500/5 overflow-hidden"
+             >
+                {profile?.plan !== 'elite' && profile?.role !== 'admin' && (
+                  <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-[2px] z-10 flex items-center justify-center">
+                    <Shield className="h-5 w-5 text-amber-600" />
+                  </div>
+                )}
+                <div className="p-4 bg-amber-500 rounded-2xl text-white shadow-lg shadow-amber-500/20 group-hover:scale-110 transition-transform"><BarChart3 className="w-6 h-6" /></div>
+                <div className="text-left">
+                  <p className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest mb-1">Curva ABC</p>
+                  <h4 className="text-xl font-black text-gray-900 dark:text-white leading-none italic">{processedData.catAItems} Estratégicos</h4>
+                </div>
+                <ChevronRight className="ml-auto w-5 h-5 text-amber-300 group-hover:translate-x-1 transition-transform" />
+             </motion.button>
+
+             <motion.button 
+                onClick={() => navigate('/app/intelligence/replenishment')} 
+                className="group relative p-6 rounded-[2rem] bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-900/30 flex items-center gap-6 transition-all hover:bg-white dark:hover:bg-gray-800 hover:shadow-xl hover:shadow-indigo-500/5 overflow-hidden"
+             >
+                {profile?.plan !== 'elite' && profile?.role !== 'admin' && (
+                  <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-[2px] z-10 flex items-center justify-center">
+                    <Shield className="h-5 w-5 text-indigo-600" />
+                  </div>
+                )}
+                <div className="p-4 bg-indigo-600 rounded-2xl text-white shadow-lg shadow-indigo-500/20 group-hover:scale-110 transition-transform"><Package className="w-6 h-6" /></div>
+                <div className="text-left">
+                  <p className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-widest mb-1">Reposição</p>
+                  <h4 className="text-xl font-black text-gray-900 dark:text-white leading-none italic">{processedData.lowStockCount} Críticos</h4>
+                </div>
+                <ChevronRight className="ml-auto w-5 h-5 text-indigo-300 group-hover:translate-x-1 transition-transform" />
+             </motion.button>
+
+             <motion.button 
+                onClick={() => navigate('/app/intelligence/health')} 
+                className="group relative p-6 rounded-[2rem] bg-purple-50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-900/30 flex items-center gap-6 transition-all hover:bg-white dark:hover:bg-gray-800 hover:shadow-xl hover:shadow-purple-500/5 overflow-hidden"
+             >
+                {profile?.plan !== 'elite' && profile?.role !== 'admin' && (
+                  <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-[2px] z-10 flex items-center justify-center">
+                    <Shield className="h-5 w-5 text-purple-600" />
+                  </div>
+                )}
+                <div className="p-4 bg-purple-600 rounded-2xl text-white shadow-lg shadow-purple-500/20 group-hover:scale-110 transition-transform"><Brain className="w-6 h-6" /></div>
+                <div className="text-left">
+                  <p className="text-[10px] font-black uppercase text-purple-600 dark:text-purple-400 tracking-widest mb-1">Saúde IA</p>
+                  <h4 className="text-xl font-black text-gray-900 dark:text-white leading-none italic">{processedData.healthScore}% IA Score</h4>
+                </div>
+                <ChevronRight className="ml-auto w-5 h-5 text-purple-300 group-hover:translate-x-1 transition-transform" />
+             </motion.button>
+          </div>
+
+          {/* Seção de Insights de IA */}
+          <div className="group relative bg-white dark:bg-gray-800 p-8 rounded-[2.5rem] shadow-xl shadow-indigo-500/5 border border-gray-50 dark:border-gray-700/50 overflow-hidden">
+            {profile?.plan !== 'elite' && profile?.role !== 'admin' && (
+              <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-[2px] z-10 flex items-center justify-center">
+                <Shield className="h-5 w-5 text-indigo-600" />
+              </div>
+            )}
+            <div className="flex items-center gap-4 mb-8">
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl">
+                 <Brain className="h-6 w-6 text-indigo-600" /> 
+              </div>
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-tight">Oportunidades</h3>
+                <p className="text-[9px] font-black text-indigo-600/60 uppercase tracking-widest">Análise via Inteligência Artificial</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              {processedData.dynamicInsights.slice(0, 4).map((insight, idx) => (
+                <div key={idx} className={`p-5 rounded-3xl ${insight.bg} border border-black/5 flex items-start gap-4 transition-all hover:translate-x-2`}>
+                  <insight.icon className={`h-5 w-5 ${insight.color} mt-1 shrink-0`} />
+                  <p className="text-xs text-gray-700 dark:text-gray-300 font-bold leading-relaxed" 
+                     dangerouslySetInnerHTML={{ __html: insight.message.replace(/\*\*(.*?)\*\*/g, '<span class="text-indigo-700 dark:text-indigo-400 font-black">$1</span>') }}></p>
+                </div>
+              ))}
+              {processedData.dynamicInsights.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">
+                   <div className="w-12 h-12 rounded-full border-2 border-dashed border-indigo-600 mb-4 animate-spin" />
+                   <p className="text-[10px] font-black uppercase tracking-widest">Analisando Mercado...</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Mini Card de Conversão OS - Movido para Lateral */}
+          <div className="group relative bg-white dark:bg-gray-800 p-8 rounded-[2.5rem] shadow-xl shadow-indigo-500/5 border border-gray-50 dark:border-gray-700/50 overflow-hidden">
+            {profile?.plan !== 'elite' && profile?.role !== 'admin' && (
+              <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-[2px] z-10 flex items-center justify-center">
+                <Shield className="h-5 w-5 text-emerald-600" />
+              </div>
+            )}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
+                  <Target className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-tight">Conversão OS</h3>
+                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Aprovações</p>
+                </div>
+              </div>
+              <p className="text-xl font-black text-emerald-600">{processedData.conversionRate}%</p>
+            </div>
+            <div className="h-32 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={processedData.conversionData} layout="vertical">
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 8, fontWeight: 900 }} width={60} />
+                  <Bar dataKey="taxa" radius={[0, 4, 4, 0]} barSize={8}>
+                    {processedData.conversionData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={entry.taxa > 60 ? '#10b981' : entry.taxa > 40 ? '#6366f1' : '#f43f5e'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Seletor de Período e Download */}
+      <footer className="flex flex-col md:flex-row md:items-center justify-between gap-6 pt-12 pb-8">
+        <div className="flex items-center gap-3">
+          <div className="flex bg-white dark:bg-gray-800 rounded-2xl p-1 shadow-xl shadow-indigo-500/5 border border-gray-100 dark:border-gray-700">
+            <button onClick={() => setPeriod('week')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${period === 'week' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-indigo-600'}`}>Visão Semanal</button>
+            <button onClick={() => setPeriod('month')} className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${period === 'month' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-indigo-600'}`}>Visão Mensal</button>
+          </div>
+          <button onClick={generatePDF} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-gray-400 p-3 rounded-2xl shadow-sm hover:text-indigo-600 group transition-all">
+            <Download className="h-5 w-5 group-hover:rotate-12 transition-transform" />
+          </button>
+        </div>
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em]">© Service Hub Executive Suite 2024</p>
+      </footer>
+
+      <AnimatePresence>
+        {showKanbanModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white dark:bg-gray-900 w-full max-w-[90vw] h-[85vh] rounded-[3rem] shadow-2xl relative">
+              <button onClick={() => setShowKanbanModal(false)} className="absolute top-6 right-8 z-[110] p-3 bg-gray-100 dark:bg-gray-800 rounded-2xl"><X className="h-6 w-6" /></button>
+              <div className="p-8 pt-16 h-full overflow-hidden"><Kanban /></div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

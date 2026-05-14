@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: service-hub
+    env: docker
+    region: ohio
+    plan: free

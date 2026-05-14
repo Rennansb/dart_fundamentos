@@ -1,0 +1,9 @@
+{
+  "name": "Turbo Pilot",
+  "version": "1.0.0",
+  "description": "Internal agent for Service Hub with automated, turbo-all workflows and autonomous decision handling.",
+  "author": "Antigravity",
+  "skills": [
+    "auto-pilot"
+  ]
+}

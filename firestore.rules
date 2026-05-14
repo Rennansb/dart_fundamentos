@@ -1,0 +1,315 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "santosrennan88@gmail.com" ||
+        request.auth.token.email == "adm2@admin.com" ||
+        request.auth.token.email == "megga11@hotmail.com" ||
+        request.auth.uid == "09sGLpwNnqSZC5bGoEKJl0r1myZ2"
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getCompanyId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId;
+    }
+
+    function hasAccess(companyId) {
+      return isAuthenticated() && (
+        isAdmin() || 
+        request.auth.uid == companyId ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getCompanyId() == companyId)
+      );
+    }
+
+    // Validation Helpers
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidTimestamp(field) {
+      return request.resource.data[field] is timestamp || request.resource.data[field] == null;
+    }
+
+    function isRecent(field) {
+      return request.resource.data[field] is timestamp && 
+             request.resource.data[field] > request.time - duration.value(5, 'm') &&
+             request.resource.data[field] <= request.time;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'name', 'photoURL', 'role', 'status', 'companyId', 'companyName', 'phone', 'cpf', 'cnpj', 'cpfCnpj', 'birthDate', 'startDate', 'createdAt', 'segment', 'cep', 'tradeName', 'fullName', 'docType', 'address', 'plan', 'planExpiresAt', 'planStatus', 'lastPaymentId', 'updatedAt', 'forcePasswordChange', 'password', 'shopName', 'ownerCpf', 'logo', 'shopPhone', 'maintenanceRecurrence', 'establishmentType', 'segments']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'shop', 'employee', 'fornecedor'] &&
+             (!('status' in data) || data.status in ['active', 'blocked', 'pending']) &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             (!('companyName' in data) || (data.companyName is string && data.companyName.size() < 200)) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('name' in data) || (data.name is string && data.name.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL == null || (data.photoURL is string && data.photoURL.size() < 1000000))) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20)) &&
+             (!('cpf' in data) || (data.cpf is string && data.cpf.size() < 20)) &&
+             (!('cnpj' in data) || (data.cnpj is string && data.cnpj.size() < 20)) &&
+             (!('cpfCnpj' in data) || (data.cpfCnpj is string && data.cpfCnpj.size() < 20)) &&
+             (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() < 20)) &&
+             (!('startDate' in data) || (data.startDate is string && data.startDate.size() < 20)) &&
+             (!('segment' in data) || data.segment == null || (data.segment is string && data.segment.size() < 50)) &&
+             (!('cep' in data) || (data.cep is string && data.cep.size() < 10)) &&
+             (!('tradeName' in data) || (data.tradeName is string && data.tradeName.size() < 200)) &&
+             (!('fullName' in data) || (data.fullName is string && data.fullName.size() < 200)) &&
+             (!('docType' in data) || data.docType in ['cpf', 'cnpj']) &&
+             (!('address' in data) || data.address is map) &&
+             (!('plan' in data) || data.plan in ['free', 'pro', 'elite']) &&
+             (!('planExpiresAt' in data) || data.planExpiresAt == null || data.planExpiresAt is string) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidVehicle(data) {
+      return hasOnlyAllowedFields(['companyId', 'customerId', 'brand', 'model', 'year', 'modelYear', 'color', 'fuel', 'serialNumber', 'notes', 'entryDate', 'deliveryDate', 'createdAt', 'type', 'plate', 'customerName', 'customerCode', 'employeeId']) &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             data.brand is string && data.brand.size() > 0 && data.brand.size() < 100 &&
+             data.model is string && data.model.size() > 0 && data.model.size() < 100 &&
+             (!('plate' in data) || (data.plate is string && data.plate.size() < 20)) &&
+             (!('modelYear' in data) || (data.modelYear is string && data.modelYear.size() < 10)) &&
+             (!('color' in data) || (data.color is string && data.color.size() < 50)) &&
+             (!('fuel' in data) || (data.fuel is string && data.fuel.size() < 50)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidCustomer(data) {
+      return hasOnlyAllowedFields(['companyId', 'name', 'cpf', 'birthDate', 'phone', 'email', 'address', 'code', 'createdAt']) &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.cpf is string && data.cpf.size() < 20 &&
+             (!('email' in data) || data.email == "" || isValidEmail(data.email)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidWorkOrder(data) {
+      return data.companyId is string && data.companyId.size() < 128 &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             data.customerId is string && data.customerId.size() < 128 &&
+             data.equipmentId is string && data.equipmentId.size() < 128 &&
+             data.reportedProblem is string && data.reportedProblem.size() < 2000 &&
+             data.status is string &&
+             (!('mileage' in data) || (data.mileage is string && data.mileage.size() < 50)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidVehicleHistory(data) {
+      return hasOnlyAllowedFields(['plate', 'brand', 'model', 'customerName', 'customerCpf', 'date', 'shopId', 'shopName', 'reportedProblem', 'services', 'parts', 'comments', 'mileage', 'workOrderId', 'totalCost']) &&
+             data.plate is string && data.plate.size() > 0 &&
+             data.shopId is string &&
+             data.workOrderId is string &&
+             (!('date' in data) || data.date is timestamp);
+    }
+
+    function isValidInventory(data) {
+      return hasOnlyAllowedFields(['companyId', 'partName', 'category', 'stockQuantity', 'minimumStockLevel', 'costPrice', 'salePrice', 'supplier', 'createdAt']) &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             data.partName is string && data.partName.size() > 0 && data.partName.size() < 200 &&
+             data.stockQuantity is number &&
+             data.salePrice is number &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidService(data) {
+      return hasOnlyAllowedFields(['companyId', 'name', 'category', 'vehicleType', 'laborPrice', 'partPrice', 'description', 'defaultPrice', 'createdAt']) &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.laborPrice is number &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && (isAdmin() || isOwner(userId));
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /vehicles/{vehicleId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && isValidVehicle(request.resource.data) && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isValidVehicle(request.resource.data) && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /customers/{customerId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && isValidCustomer(request.resource.data) && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isValidCustomer(request.resource.data) && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /work_orders/{workOrderId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && (isAdmin() || (isValidWorkOrder(request.resource.data) && hasAccess(request.resource.data.companyId)));
+      allow update: if isAuthenticated() && (isAdmin() || (isValidWorkOrder(request.resource.data) && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId));
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && isValidInventory(request.resource.data) && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isValidInventory(request.resource.data) && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    function isValidQuote(data) {
+      return data.companyId is string && data.companyId.size() < 128 &&
+             data.companyId is string && data.companyId.size() < 128 &&
+             data.customerId is string && data.customerId.size() < 128 &&
+             data.customerName is string && data.customerName.size() < 100 &&
+             (!('customerCpf' in data) || (data.customerCpf is string && data.customerCpf.size() < 50)) &&
+             (!('customerPhone' in data) || (data.customerPhone is string && data.customerPhone.size() < 50)) &&
+             (!('customerEmail' in data) || (data.customerEmail is string && data.customerEmail.size() < 200)) &&
+             (!('customerAddress' in data) || (data.customerAddress is string && data.customerAddress.size() < 500)) &&
+             (!('vehicleId' in data) || data.vehicleId == null || (data.vehicleId is string && data.vehicleId.size() < 128)) &&
+             (!('vehicleInfo' in data) || data.vehicleInfo == null || (data.vehicleInfo is string && data.vehicleInfo.size() < 500)) &&
+             data.employeeId is string && data.employeeId.size() < 128 &&
+             data.employeeName is string && data.employeeName.size() < 200 &&
+             data.parts is list && data.parts.size() < 200 &&
+             data.laborPrice is number && data.laborPrice >= 0 &&
+             data.total is number && data.total >= 0 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             (data.createdAt == null || data.createdAt is timestamp);
+    }
+
+    match /services/{serviceId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && isValidService(request.resource.data) && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isValidService(request.resource.data) && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /quotes/{quoteId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && isValidQuote(request.resource.data) && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isValidQuote(request.resource.data) && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && hasAccess(request.resource.data.companyId);
+      allow update, delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+    
+    match /expenses/{expenseId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /reminders/{reminderId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+      allow create: if isAuthenticated() && hasAccess(request.resource.data.companyId);
+      allow update: if isAuthenticated() && hasAccess(resource.data.companyId) && request.resource.data.companyId == resource.data.companyId;
+      allow delete: if isAuthenticated() && (isAdmin() || (resource != null && hasAccess(resource.data.companyId)));
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && hasAccess(get(/databases/$(database)/documents/conversations/$(conversationId)).data.companyId);
+        allow create: if isAuthenticated() && hasAccess(get(/databases/$(database)/documents/conversations/$(conversationId)).data.companyId);
+      }
+    }
+
+    match /parts/{partId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated() && (isAdmin() || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'fornecedor'));
+    }
+
+    function isValidPurchaseOrder(data) {
+      return data.shopId is string && data.shopId.size() < 128 &&
+             data.shopId is string && data.shopId.size() < 128 &&
+             data.supplierId is string && data.supplierId.size() < 128 &&
+             data.items is list && data.items.size() < 200 &&
+             data.total is number &&
+             data.status in ['aguardando_pagamento', 'aguardando envio', 'peça encaminhada', 'recebido', 'pagamento_realizado', 'cancelado', 'pendente', 'devolução solicitada', 'devolução aprovada'] &&
+             (data.createdAt == null || data.createdAt is timestamp);
+    }
+
+    match /purchase_orders/{orderId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasAccess(resource.data.shopId) || request.auth.uid == resource.data.supplierId);
+      allow create: if isAuthenticated() && isValidPurchaseOrder(request.resource.data) && hasAccess(request.resource.data.shopId);
+      allow update: if isAuthenticated() && isValidPurchaseOrder(request.resource.data) && (isAdmin() || hasAccess(resource.data.shopId) || request.auth.uid == resource.data.supplierId);
+    }
+    match /search_logs/{logId} {
+      allow read: if isAuthenticated() && (isAdmin() || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'fornecedor'));
+      allow create: if isAuthenticated() && (isAdmin() || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'shop'));
+    }
+
+    match /appointments/{appointmentId} {
+      allow read, write: if isAuthenticated() && (isAdmin() || hasAccess(resource.data.companyId) || (request.resource.data != null && hasAccess(request.resource.data.companyId)));
+    }
+
+    function isValidInternalChat(data) {
+      return hasOnlyAllowedFields(['userId', 'userName', 'role', 'theme', 'status', 'lastMessage', 'lastMessageAt', 'unreadCountAdmin', 'unreadCountUser', 'createdAt']) &&
+             data.userId is string && data.userId.size() < 128 &&
+             data.status in ['open', 'closed'] &&
+             data.theme is string && data.theme.size() < 200 &&
+             (data.createdAt == null || data.createdAt is timestamp);
+    }
+
+    match /internal_chats/{chatId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidInternalChat(request.resource.data) && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (isAdmin() || (resource.data.userId == request.auth.uid && hasOnlyAllowedFields(['lastMessage', 'lastMessageAt', 'unreadCountAdmin', 'unreadCountUser'])));
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && (isAdmin() || get(/databases/$(database)/documents/internal_chats/$(chatId)).data.userId == request.auth.uid);
+        allow create: if isAuthenticated() && (isAdmin() || get(/databases/$(database)/documents/internal_chats/$(chatId)).data.userId == request.auth.uid);
+        allow update: if isAuthenticated() && (isAdmin() || get(/databases/$(database)/documents/internal_chats/$(chatId)).data.userId == request.auth.uid);
+      }
+
+    }
+
+    match /test/connection {
+      allow read, write: if true;
+    }
+
+    match /vehicle_history/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVehicleHistory(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+  }
+}

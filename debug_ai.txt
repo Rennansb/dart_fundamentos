@@ -1,0 +1,16 @@
+[General AI Chat Error]: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [404 Not Found] models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [404 Not Found] models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+    at handleResponseNotOk (file:///home/rennan/Imagens/Service-Hub/node_modules/@google/generative-ai/dist/index.mjs:432:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async makeRequest (file:///home/rennan/Imagens/Service-Hub/node_modules/@google/generative-ai/dist/index.mjs:401:9)
+    at async generateContent (file:///home/rennan/Imagens/Service-Hub/node_modules/@google/generative-ai/dist/index.mjs:865:22)
+    at async <anonymous> (/home/rennan/Imagens/Service-Hub/server.ts:325:22)
+---
+[General AI Chat Error]: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [404 Not Found] models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+Error: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [404 Not Found] models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+    at handleResponseNotOk (file:///home/rennan/Imagens/Service-Hub/node_modules/@google/generative-ai/dist/index.mjs:432:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async makeRequest (file:///home/rennan/Imagens/Service-Hub/node_modules/@google/generative-ai/dist/index.mjs:401:9)
+    at async generateContent (file:///home/rennan/Imagens/Service-Hub/node_modules/@google/generative-ai/dist/index.mjs:865:22)
+    at async <anonymous> (/home/rennan/Imagens/Service-Hub/server.ts:325:22)
+---
